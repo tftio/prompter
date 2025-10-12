@@ -142,7 +142,7 @@ release level:
 
     # Create tag
     echo "Step 5: Creating git tag..."
-    versioneer tag --tag-format "prompter-v{version}"
+    versioneer tag --tag-format "v{version}"
 
     # Verify tag matches version
     TAG_VERSION=$(git describe --exact-match --tags HEAD | sed "s/prompter-v//")
@@ -156,7 +156,7 @@ release level:
     # Interactive confirmation
     echo "📋 Release Summary:"
     echo "   Version: $NEW_VERSION"
-    echo "   Tag: prompter-v$NEW_VERSION"
+    echo "   Tag: v$NEW_VERSION"
     echo "   Branch: main"
     echo "   This will trigger GitHub Actions to create the release"
     echo ""
@@ -183,7 +183,7 @@ release level:
     echo ""
     echo "🎉 Release $NEW_VERSION pushed successfully!"
     echo "   Monitor: https://github.com/workhelix/prompter/actions"
-    echo "   Release: https://github.com/workhelix/prompter/releases/tag/prompter-v$NEW_VERSION"
+    echo "   Release: https://github.com/workhelix/prompter/releases/tag/v$NEW_VERSION"
 
 # Clean build artifacts
 clean:

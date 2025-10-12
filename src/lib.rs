@@ -68,6 +68,8 @@ pub struct Cli {
 pub enum Commands {
     /// Show version information
     Version,
+    /// Show license information
+    License,
     /// Initialize default config and library
     Init,
     /// List available profiles
@@ -143,6 +145,8 @@ pub enum AppMode {
     Init,
     /// Show version information
     Version,
+    /// Show license information
+    License,
     /// Show help information
     Help,
     /// Generate shell completion scripts
@@ -186,6 +190,7 @@ pub fn parse_args_from(args: Vec<String>) -> Result<AppMode, String> {
 
     match (&cli.command, &cli.profile) {
         (Some(Commands::Version), _) => Ok(AppMode::Version),
+        (Some(Commands::License), _) => Ok(AppMode::License),
         (Some(Commands::Init), _) => Ok(AppMode::Init),
         (Some(Commands::List), _) => Ok(AppMode::List {
             config: cli.config.clone(),
