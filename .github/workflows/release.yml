@@ -44,7 +44,7 @@ jobs:
             --title "Prompter ${{ steps.version.outputs.version_number }}" \
             --generate-notes \
             --draft \
-            --repo workhelix/prompter
+            --repo ${{ github.repository }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -106,6 +106,6 @@ jobs:
         run: |
           gh release edit ${{ needs.create-release.outputs.version }} \
             --draft=false \
-            --repo workhelix/prompter
+            --repo ${{ github.repository }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
