@@ -22,13 +22,13 @@ A small Rust CLI to compose reusable prompt snippets from a library and a TOML m
 Install the latest release directly from GitHub:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/workhelix/prompter/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tftio/prompter/main/install.sh | sh
 ```
 
 Or with a custom install directory:
 
 ```bash
-INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/workhelix/prompter/main/install.sh | sh
+INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/tftio/prompter/main/install.sh | sh
 ```
 
 The install script will:
@@ -44,7 +44,7 @@ The install script will:
 **Option A — From source (requires Rust toolchain):**
 
 ```bash
-git clone https://github.com/workhelix/prompter.git
+git clone https://github.com/tftio/prompter.git
 cd prompter
 cargo build --release
 install -m 0755 target/release/prompter ~/.local/bin/
@@ -59,7 +59,7 @@ install -m 0755 target/release/prompter ~/.local/bin/
 
 **Option C — Download release manually:**
 
-1. Go to [Releases](https://github.com/workhelix/prompter/releases)
+1. Go to [Releases](https://github.com/tftio/prompter/releases)
 2. Download the appropriate `prompter-{target}.zip` for your platform
 3. Extract and copy the binary to a directory in your PATH
 
