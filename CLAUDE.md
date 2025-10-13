@@ -135,7 +135,7 @@ This project uses the **`v{version}`** tag format (e.g., `v1.0.10`), not monorep
 
 ### Release Commands
 ```bash
-# Create and push tag (triggers GitHub Actions release)
+# Validate and push tag (triggers GitHub Actions release)
 just release v1.0.11
 
 # Manual version management (advanced)
@@ -144,7 +144,7 @@ versioneer minor             # Bump version: 1.0.10 -> 1.1.0
 versioneer major             # Bump version: 1.0.10 -> 2.0.0
 versioneer sync              # Synchronize version files
 versioneer verify            # Check version consistency
-versioneer tag --tag-format "v{version}"  # Create v{VERSION} tag (REQUIRED: override default prompter-v{version} format)
+git tag v1.0.11              # Create tag (use v{version} format)
 ```
 
 ### Release Workflow
@@ -156,7 +156,7 @@ The release process is fully automated via GitHub Actions when a tag is pushed:
    versioneer patch        # Bump to next patch version
    git add Cargo.toml Cargo.lock VERSION
    git commit -m "chore: bump version to $(cat VERSION)"
-   versioneer tag --tag-format "v{version}"  # Creates v{VERSION} tag
+   git tag v1.0.11         # Create tag matching VERSION file
    ```
 
 2. **Trigger release**: Push tag to GitHub
@@ -183,7 +183,7 @@ The release process is fully automated via GitHub Actions when a tag is pushed:
 
 ### Troubleshooting
 - **Version mismatch errors**: Run `versioneer verify` and `versioneer sync`
-- **Tag conflicts**: Use `versioneer tag --tag-format "v{version}"` instead of `git tag`
+- **Tag conflicts**: Delete incorrect tag with `git tag -d TAG_NAME` and recreate with correct format
 - **Failed releases**: Check GitHub Actions logs for version validation errors
 - **Release not triggered**: Ensure tag format is `v{version}` (e.g., `v1.0.10`), not `prompter-v{version}`
-- **Wrong tag format created**: versioneer's default is `prompter-v{version}` - always use `--tag-format "v{version}"` flag
+- **Wrong tag format**: Always use `git tag v{version}` format, not versioneer's default `prompter-v{version}`
