@@ -36,4 +36,4 @@ dirs = "5.0"
 indicatif = "0.17"
 is-terminal = "0.4"
 toml = "0.8"
-workhelix-cli-common = { git = "https://github.com/workhelix/workhelix-cli-common", tag = "v0.1.0" }
+workhelix-cli-common = { git = "https://github.com/tftio/workhelix-cli-common", tag = "v0.1.0" }
