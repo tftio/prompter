@@ -9,10 +9,9 @@ use prompter::{
     AppMode, Cli, init_scaffold, parse_args_from, run_list_stdout, run_render_stdout,
     run_validate_stdout,
 };
+use workhelix_cli_common::LicenseType;
 
-mod completions;
 mod doctor;
-mod update;
 
 fn parse_args() -> Result<AppMode, String> {
     let args: Vec<String> = env::args().collect();
@@ -35,8 +34,14 @@ fn main() {
         AppMode::Version => {
             println!("prompter {}", env!("CARGO_PKG_VERSION"));
         }
+        AppMode::License => {
+            println!(
+                "{}",
+                workhelix_cli_common::license::display_license("prompter", LicenseType::MIT)
+            );
+        }
         AppMode::Completions { shell } => {
-            completions::generate_completions(shell);
+            workhelix_cli_common::completions::generate_completions::<Cli>(shell);
         }
         AppMode::Doctor => {
             let exit_code = doctor::run_doctor();
@@ -47,7 +52,13 @@ fn main() {
             force,
             install_dir,
         } => {
-            let exit_code = update::run_update(version.as_deref(), force, install_dir.as_deref());
+            let exit_code = workhelix_cli_common::update::run_update(
+                &workhelix_cli_common::RepoInfo::new("workhelix", "prompter", "v"),
+                env!("CARGO_PKG_VERSION"),
+                version.as_deref(),
+                force,
+                install_dir.as_deref(),
+            );
             std::process::exit(exit_code);
         }
         AppMode::Init => {
