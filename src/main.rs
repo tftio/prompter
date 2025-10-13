@@ -53,7 +53,7 @@ fn main() {
             install_dir,
         } => {
             let exit_code = workhelix_cli_common::update::run_update(
-                &workhelix_cli_common::RepoInfo::new("workhelix", "prompter", "v"),
+                &workhelix_cli_common::RepoInfo::new("tftio", "prompter", "v"),
                 env!("CARGO_PKG_VERSION"),
                 version.as_deref(),
                 force,

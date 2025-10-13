@@ -61,7 +61,7 @@ pub fn run_doctor() -> i32 {
 
     // Check for updates
     println!("Updates:");
-    let repo_info = RepoInfo::new("workhelix", "prompter", "v");
+    let repo_info = RepoInfo::new("tftio", "prompter", "v");
     match workhelix_cli_common::doctor::check_for_updates(&repo_info, env!("CARGO_PKG_VERSION")) {
         Ok(Some(latest)) => {
             let current = env!("CARGO_PKG_VERSION");
