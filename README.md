@@ -171,30 +171,70 @@ You can override this with the `-p/--pre-prompt` option or disable it entirely b
 2. **NEVER create git tags manually** - Use `just release` or versioneer commands
 3. **ALWAYS use automated release workflow** - Prevents version/tag mismatches
 
+### Tag Format
+
+This project uses the **`v{version}`** tag format (e.g., `v1.0.10`), not monorepo-style `{project}-v{version}` tags.
+
+**Examples:**
+- ✅ `v1.0.10`
+- ✅ `v1.1.0`
+- ✅ `v2.0.0`
+- ❌ `prompter-v1.0.10` (monorepo format, not used here)
+
 ### Release Commands
 ```bash
-# Automated release (recommended)
-just release patch   # 1.0.10 -> 1.0.11
-just release minor   # 1.0.10 -> 1.1.0
-just release major   # 1.0.10 -> 2.0.0
+# Create and push tag (triggers GitHub Actions release)
+just release v1.0.11
 
 # Manual version management (advanced)
-versioneer patch             # Bump version
+versioneer patch             # Bump version: 1.0.10 -> 1.0.11
+versioneer minor             # Bump version: 1.0.10 -> 1.1.0
+versioneer major             # Bump version: 1.0.10 -> 2.0.0
 versioneer sync              # Synchronize version files
 versioneer verify            # Check version consistency
-versioneer tag               # Create matching git tag
+versioneer tag --tag-format "v{version}"  # Create v{VERSION} tag (REQUIRED: override default prompter-v{version} format)
 ```
 
+### Release Workflow
+
+The release process is fully automated via GitHub Actions when a tag is pushed:
+
+1. **Prepare release**: Version bump and create tag locally
+   ```bash
+   versioneer patch        # Bump to next patch version
+   git add Cargo.toml Cargo.lock VERSION
+   git commit -m "chore: bump version to $(cat VERSION)"
+   versioneer tag --tag-format "v{version}"  # Creates v{VERSION} tag
+   ```
+
+2. **Trigger release**: Push tag to GitHub
+   ```bash
+   just release v1.0.11    # Validates and pushes tag
+   # OR manually: git push origin v1.0.11
+   ```
+
+3. **GitHub Actions automatically**:
+   - Validates tag version matches Cargo.toml
+   - Creates draft release with generated notes
+   - Builds binaries for Linux (x64, ARM64), macOS (Intel, Apple Silicon), Windows
+   - Uploads binaries with LICENSE, README.md, CLAUDE.md
+   - Generates SHA256 checksums
+   - Publishes release
+
+4. **Monitor**: `gh run list --workflow=release.yml`
+
 ### Quality Gates
-- **Pre-push hooks**: Verify version file synchronization and tag consistency
+- **Pre-push hooks**: Verify version file synchronization and tag consistency (via peter-hook)
 - **GitHub Actions**: Validate tag version matches Cargo.toml before release
 - **Binary verification**: Confirm built binary reports expected version
-- **Release workflow**: Runs full quality pipeline (tests, lints, audits) before release
+- **CI pipeline**: Full quality checks (format, lint, test, audit) run on main branch
 
 ### Troubleshooting
 - **Version mismatch errors**: Run `versioneer verify` and `versioneer sync`
-- **Tag conflicts**: Use `versioneer tag` instead of `git tag`
+- **Tag conflicts**: Use `versioneer tag --tag-format "v{version}"` instead of `git tag`
 - **Failed releases**: Check GitHub Actions logs for version validation errors
+- **Release not triggered**: Ensure tag format is `v{version}` (e.g., `v1.0.10`), not `prompter-v{version}`
+- **Wrong tag format created**: versioneer's default is `prompter-v{version}` - always use `--tag-format "v{version}"` flag
 
 ## Development
 - Build: `cargo build --release`
