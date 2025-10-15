@@ -41,7 +41,7 @@ fn main() {
             );
         }
         AppMode::Completions { shell } => {
-            workhelix_cli_common::completions::generate_completions::<Cli>(shell);
+            prompter::completions::generate(shell);
         }
         AppMode::Doctor => {
             let exit_code = doctor::run_doctor();

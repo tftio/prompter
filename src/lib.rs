@@ -4,6 +4,8 @@
 //! from a structured library using TOML configuration files. It supports recursive
 //! profile dependencies, file deduplication, and customizable output formatting.
 
+pub mod completions;
+
 use chrono::Local;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
