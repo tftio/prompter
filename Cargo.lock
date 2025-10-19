@@ -1502,7 +1502,7 @@ dependencies = [
 
 [[package]]
 name = "prompter"
-version = "1.7.2"
+version = "1.7.5"
 dependencies = [
  "cargo-edit",
  "chrono",

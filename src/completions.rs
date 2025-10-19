@@ -247,8 +247,8 @@ function __fish_prompter__profiles
 	end
 end
 
-complete -c prompter -n "__fish_prompter_needs_command" -a "(__fish_prompter__profiles)" -d 'Profile'
-complete -c prompter -n "__fish_prompter_using_subcommand run" -a "(__fish_prompter__profiles)" -d 'Profile'
+complete -c prompter -n "__fish_prompter_needs_command" -f -a "(__fish_prompter__profiles)" -d 'Profile'
+complete -c prompter -n "__fish_prompter_using_subcommand run" -f -a "(__fish_prompter__profiles)" -d 'Profile'
 "#;
 
 #[cfg(test)]
