@@ -78,10 +78,11 @@ pub enum Commands {
     List,
     /// Validate configuration and library references
     Validate,
-    /// Render a profile (concatenated file contents)
+    /// Render one or more profiles (concatenated file contents with deduplication)
     Run {
-        /// Profile name to render
-        profile: String,
+        /// Profile name(s) to render
+        #[arg(required = true)]
+        profiles: Vec<String>,
         /// Separator between files
         #[arg(short, long)]
         separator: Option<String>,
@@ -120,10 +121,10 @@ pub enum Commands {
 /// both subcommands and direct profile arguments.
 #[derive(Debug)]
 pub enum AppMode {
-    /// Render a profile with optional separator and pre-prompt
+    /// Render one or more profiles with optional separator and pre-prompt
     Run {
-        /// Profile name to render
-        profile: String,
+        /// Profile name(s) to render
+        profiles: Vec<String>,
         /// Optional separator between concatenated files
         separator: Option<String>,
         /// Optional custom pre-prompt text
@@ -216,7 +217,7 @@ pub fn parse_args_from(args: Vec<String>) -> Result<AppMode, String> {
         }),
         (
             Some(Commands::Run {
-                profile,
+                profiles,
                 separator,
                 pre_prompt,
                 post_prompt,
@@ -236,7 +237,7 @@ pub fn parse_args_from(args: Vec<String>) -> Result<AppMode, String> {
                 .or(cli.post_prompt.as_ref())
                 .map(|s| unescape(s));
             Ok(AppMode::Run {
-                profile: profile.clone(),
+                profiles: profiles.clone(),
                 separator: sep,
                 pre_prompt: pre,
                 post_prompt: post,
@@ -248,7 +249,7 @@ pub fn parse_args_from(args: Vec<String>) -> Result<AppMode, String> {
             let pre = cli.pre_prompt.as_ref().map(|s| unescape(s));
             let post = cli.post_prompt.as_ref().map(|s| unescape(s));
             Ok(AppMode::Run {
-                profile: profile.clone(),
+                profiles: vec![profile.clone()],
                 separator: sep,
                 pre_prompt: pre,
                 post_prompt: post,
@@ -899,23 +900,25 @@ pub fn run_validate_stdout(config_override: Option<&Path>) -> Result<(), String>
     validate(&cfg, &lib)
 }
 
-/// Render a profile's content to a writer.
+/// Render one or more profiles' content to a writer.
 ///
 /// Resolves profile dependencies and writes the concatenated content
 /// to the provided writer, including pre-prompt, system info, file
-/// contents with optional separators, and post-prompt.
+/// contents with optional separators, and post-prompt. When multiple
+/// profiles are provided, files are deduplicated across all profiles
+/// (first occurrence wins).
 ///
 /// # Arguments
 /// * `cfg` - Configuration containing profile definitions
 /// * `lib` - Library root directory for file resolution
 /// * `w` - Writer to output rendered content to
-/// * `profile` - Profile name to render
+/// * `profiles` - Profile names to render (deduplicated in order)
 /// * `separator` - Optional separator between files
 /// * `pre_prompt` - Optional custom pre-prompt (defaults to LLM instructions)
 /// * `post_prompt` - Optional custom post-prompt (defaults to @AGENTS/@CLAUDE instructions)
 ///
 /// # Returns
-/// * `Ok(())` - Profile rendered successfully
+/// * `Ok(())` - Profiles rendered successfully
 /// * `Err(String)` - Rendering failed
 ///
 /// # Errors
@@ -927,25 +930,29 @@ pub fn render_to_writer(
     cfg: &Config,
     lib: &Path,
     mut w: impl Write,
-    profile: &str,
+    profiles: &[String],
     separator: Option<&str>,
     pre_prompt: Option<&str>,
     post_prompt: Option<&str>,
 ) -> Result<(), String> {
     let mut seen_files = HashSet::new();
-    let mut stack = Vec::new();
     let mut files = Vec::new();
-    resolve_profile(profile, cfg, lib, &mut seen_files, &mut stack, &mut files).map_err(
-        |e| match e {
-            ResolveError::UnknownProfile(p) => format!("Unknown profile: {p}"),
-            ResolveError::Cycle(c) => format!("Cycle detected: {}", c.join(" -> ")),
-            ResolveError::MissingFile(path, prof) => format!(
-                "Missing file: {} (referenced by [{}])",
-                path.display(),
-                prof
-            ),
-        },
-    )?;
+
+    // Resolve all profiles with shared deduplication
+    for profile in profiles {
+        let mut stack = Vec::new();
+        resolve_profile(profile, cfg, lib, &mut seen_files, &mut stack, &mut files).map_err(
+            |e| match e {
+                ResolveError::UnknownProfile(p) => format!("Unknown profile: {p}"),
+                ResolveError::Cycle(c) => format!("Cycle detected: {}", c.join(" -> ")),
+                ResolveError::MissingFile(path, prof) => format!(
+                    "Missing file: {} (referenced by [{}])",
+                    path.display(),
+                    prof
+                ),
+            },
+        )?;
+    }
 
     // Write pre-prompt (defaults if not provided)
     let default_pre = default_pre_prompt();
@@ -995,19 +1002,20 @@ pub fn render_to_writer(
     Ok(())
 }
 
-/// Render a profile to stdout.
+/// Render one or more profiles to stdout.
 ///
 /// Convenience function that reads configuration and renders the specified
-/// profile to standard output with optional separator, pre-prompt, and post-prompt.
+/// profiles to standard output with optional separator, pre-prompt, and post-prompt.
+/// When multiple profiles are provided, files are deduplicated across all profiles.
 ///
 /// # Arguments
-/// * `profile` - Profile name to render
+/// * `profiles` - Profile names to render (deduplicated in order)
 /// * `separator` - Optional separator between files
 /// * `pre_prompt` - Optional custom pre-prompt text
 /// * `post_prompt` - Optional custom post-prompt text
 ///
 /// # Returns
-/// * `Ok(())` - Profile rendered successfully
+/// * `Ok(())` - Profiles rendered successfully
 /// * `Err(String)` - Rendering failed
 ///
 /// # Errors
@@ -1016,7 +1024,7 @@ pub fn render_to_writer(
 /// - Profile resolution fails
 /// - Writing to stdout fails
 pub fn run_render_stdout(
-    profile: &str,
+    profiles: &[String],
     separator: Option<&str>,
     pre_prompt: Option<&str>,
     post_prompt: Option<&str>,
@@ -1032,7 +1040,7 @@ pub fn run_render_stdout(
         &cfg,
         &lib,
         handle,
-        profile,
+        profiles,
         separator,
         pre_prompt,
         post_prompt,
@@ -1225,7 +1233,16 @@ depends_on = [
             post_prompt: None,
         };
         let mut out = Vec::new();
-        super::render_to_writer(&cfg, &lib, &mut out, "root", Some("\n--\n"), None, None).unwrap();
+        super::render_to_writer(
+            &cfg,
+            &lib,
+            &mut out,
+            &["root".to_string()],
+            Some("\n--\n"),
+            None,
+            None,
+        )
+        .unwrap();
 
         let output_str = String::from_utf8(out).unwrap();
         // Should start with default pre-prompt
@@ -1260,7 +1277,7 @@ depends_on = [
             &cfg,
             &lib,
             &mut out,
-            "test",
+            &["test".to_string()],
             None,
             Some("Custom pre-prompt\n\n"),
             None,
@@ -1292,7 +1309,16 @@ depends_on = [
             post_prompt: Some("Custom config post-prompt".to_string()),
         };
         let mut out = Vec::new();
-        super::render_to_writer(&cfg, &lib, &mut out, "test", None, None, None).unwrap();
+        super::render_to_writer(
+            &cfg,
+            &lib,
+            &mut out,
+            &["test".to_string()],
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         let output_str = String::from_utf8(out).unwrap();
         // Should end with config post-prompt
@@ -1304,7 +1330,7 @@ depends_on = [
             &cfg,
             &lib,
             &mut out2,
-            "test",
+            &["test".to_string()],
             None,
             None,
             Some("CLI post-prompt"),
@@ -1314,6 +1340,71 @@ depends_on = [
         let output_str2 = String::from_utf8(out2).unwrap();
         // Should end with CLI post-prompt
         assert!(output_str2.ends_with("CLI post-prompt"));
+    }
+
+    #[test]
+    fn test_render_multiple_profiles_with_deduplication() {
+        // Create library with files that will be shared across profiles
+        let lib = mk_tmp("prompter_multi_profile_dedup");
+        fs::create_dir_all(lib.join("shared")).unwrap();
+        fs::create_dir_all(lib.join("a")).unwrap();
+        fs::create_dir_all(lib.join("b")).unwrap();
+
+        fs::write(lib.join("shared/common.md"), b"COMMON\n").unwrap();
+        fs::write(lib.join("a/specific.md"), b"A_SPECIFIC\n").unwrap();
+        fs::write(lib.join("b/specific.md"), b"B_SPECIFIC\n").unwrap();
+
+        // Create config where both profiles depend on the common file
+        let cfg = Config {
+            profiles: HashMap::from([
+                (
+                    "profile_a".into(),
+                    vec!["shared/common.md".into(), "a/specific.md".into()],
+                ),
+                (
+                    "profile_b".into(),
+                    vec!["shared/common.md".into(), "b/specific.md".into()],
+                ),
+            ]),
+            post_prompt: None,
+        };
+
+        // Render both profiles together
+        let mut out = Vec::new();
+        super::render_to_writer(
+            &cfg,
+            &lib,
+            &mut out,
+            &["profile_a".to_string(), "profile_b".to_string()],
+            Some("\n---\n"),
+            None,
+            None,
+        )
+        .unwrap();
+
+        let output_str = String::from_utf8(out).unwrap();
+
+        // Verify the common file appears only once
+        let common_count = output_str.matches("COMMON").count();
+        assert_eq!(
+            common_count, 1,
+            "Common file should appear exactly once, found {common_count}"
+        );
+
+        // Verify both specific files appear
+        assert!(output_str.contains("A_SPECIFIC"));
+        assert!(output_str.contains("B_SPECIFIC"));
+
+        // Verify order: common should appear first (from profile_a), then a_specific, then b_specific
+        let common_pos = output_str.find("COMMON").unwrap();
+        let a_pos = output_str.find("A_SPECIFIC").unwrap();
+        let b_pos = output_str.find("B_SPECIFIC").unwrap();
+
+        assert!(
+            common_pos < a_pos,
+            "Common file should come before A_SPECIFIC"
+        );
+        assert!(a_pos < b_pos, "A_SPECIFIC should come before B_SPECIFIC");
     }
 
     #[test]
@@ -1349,13 +1440,13 @@ depends_on = ["file.md"]
         ];
         match parse_args_from(args).unwrap() {
             AppMode::Run {
-                profile,
+                profiles,
                 separator,
                 pre_prompt,
                 post_prompt,
                 config,
             } => {
-                assert_eq!(profile, "profile");
+                assert_eq!(profiles, vec!["profile".to_string()]);
                 assert_eq!(separator, Some("\n--\n".into()));
                 assert_eq!(pre_prompt, None);
                 assert_eq!(post_prompt, None);
@@ -1372,13 +1463,13 @@ depends_on = ["file.md"]
         ];
         match parse_args_from(args).unwrap() {
             AppMode::Run {
-                profile,
+                profiles,
                 separator,
                 pre_prompt,
                 post_prompt,
                 config,
             } => {
-                assert_eq!(profile, "profile");
+                assert_eq!(profiles, vec!["profile".to_string()]);
                 assert_eq!(separator, None);
                 assert_eq!(pre_prompt, Some("Custom pre-prompt".into()));
                 assert_eq!(post_prompt, None);
@@ -1463,8 +1554,16 @@ depends_on = ["file.md"]
             writes_done: 0,
             fail_on: 3,
         }; // pre-prompt ok, system prefix ok, fail on separator
-        let err =
-            super::render_to_writer(&cfg, &lib, &mut w, "p", Some("--"), None, None).unwrap_err();
+        let err = super::render_to_writer(
+            &cfg,
+            &lib,
+            &mut w,
+            &["p".to_string()],
+            Some("--"),
+            None,
+            None,
+        )
+        .unwrap_err();
         assert!(err.contains("Write error"), "err={err}");
     }
 
@@ -1481,8 +1580,16 @@ depends_on = ["file.md"]
             writes_done: 0,
             fail_on: 1,
         }; // fail on first write (pre-prompt)
-        let err =
-            super::render_to_writer(&cfg, &lib, &mut w, "p", Some("--"), None, None).unwrap_err();
+        let err = super::render_to_writer(
+            &cfg,
+            &lib,
+            &mut w,
+            &["p".to_string()],
+            Some("--"),
+            None,
+            None,
+        )
+        .unwrap_err();
         assert!(err.contains("Write error"), "err={err}");
     }
 

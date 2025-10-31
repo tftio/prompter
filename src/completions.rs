@@ -116,10 +116,12 @@ fn augment_bash(script: &mut String) {
 }
 
 fn augment_zsh(script: &mut String) {
+    // With Vec<String>, clap generates '*::profiles' variadic patterns
     const ROOT_MARKER: &str =
         "::profile -- Profile to render (shorthand for 'run `<profile>`'):_default";
-    const RUN_MARKER: &str = ":profile -- Profile name to render:_default";
+    const RUN_MARKER_VARIADIC: &str = "*::profiles -- Profile name(s) to render:_default";
 
+    // Update root shorthand profile completion
     if let Some(start) = script.find(ROOT_MARKER) {
         script.replace_range(
             start..start + ROOT_MARKER.len(),
@@ -127,10 +129,11 @@ fn augment_zsh(script: &mut String) {
         );
     }
 
-    if let Some(start) = script.find(RUN_MARKER) {
+    // Update run subcommand profiles completion (variadic)
+    if let Some(start) = script.find(RUN_MARKER_VARIADIC) {
         script.replace_range(
-            start..start + RUN_MARKER.len(),
-            ":profile -- Profile name to render:_prompter_dynamic_profiles",
+            start..start + RUN_MARKER_VARIADIC.len(),
+            "*::profiles -- Profile name(s) to render:_prompter_dynamic_profiles",
         );
     }
 
@@ -279,11 +282,14 @@ mod tests {
     fn zsh_augmentation_redirects_profile_completion() {
         let mut script = raw_script(Shell::Zsh);
         augment_zsh(&mut script);
+
+        // Verify the dynamic profile completion function is present
         assert!(script.contains("_prompter_dynamic_profiles"));
+        // Verify it's being used for both shorthand and run subcommand
         assert!(script.contains(":_prompter_dynamic_profiles"));
+        // With Vec<String>, the run command should use variadic completion
         assert!(
-            !script.contains("Profile name to render:_default"),
-            "should use dynamic profile completer"
+            script.contains("*::profiles -- Profile name(s) to render:_prompter_dynamic_profiles")
         );
     }
 

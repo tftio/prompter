@@ -81,14 +81,14 @@ fn main() {
             }
         },
         AppMode::Run {
-            profile,
+            profiles,
             separator,
             pre_prompt,
             post_prompt,
             config,
         } => {
             if let Err(e) = run_render_stdout(
-                &profile,
+                &profiles,
                 separator.as_deref(),
                 pre_prompt.as_deref(),
                 post_prompt.as_deref(),
