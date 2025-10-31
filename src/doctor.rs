@@ -1,7 +1,6 @@
 //! Health check and diagnostics module.
 
 use std::path::Path;
-use workhelix_cli_common::RepoInfo;
 
 /// Run doctor command to check health and configuration.
 ///
@@ -12,7 +11,6 @@ pub fn run_doctor() -> i32 {
     println!();
 
     let mut has_errors = false;
-    let mut has_warnings = false;
 
     // Check configuration
     println!("Configuration:");
@@ -59,50 +57,17 @@ pub fn run_doctor() -> i32 {
 
     println!();
 
-    // Check for updates
-    println!("Updates:");
-    let repo_info = RepoInfo::new("tftio", "prompter", "v");
-    match workhelix_cli_common::doctor::check_for_updates(&repo_info, env!("CARGO_PKG_VERSION")) {
-        Ok(Some(latest)) => {
-            let current = env!("CARGO_PKG_VERSION");
-            println!("  ⚠️  Update available: v{latest} (current: v{current})");
-            println!("  💡 Run 'prompter update' to install the latest version");
-            has_warnings = true;
-        }
-        Ok(None) => {
-            println!(
-                "  ✅ Running latest version (v{})",
-                env!("CARGO_PKG_VERSION")
-            );
-        }
-        Err(e) => {
-            println!("  ⚠️  Failed to check for updates: {e}");
-            has_warnings = true;
-        }
-    }
+    // Version info
+    println!("Version:");
+    println!("  ℹ️  Current version: v{}", env!("CARGO_PKG_VERSION"));
+    println!("  💡 Check https://github.com/tftio/prompter/releases for updates");
 
     println!();
 
     // Summary
     if has_errors {
-        println!(
-            "❌ {} found",
-            if has_warnings {
-                format!(
-                    "{} error{}, {} warning{}",
-                    if has_errors { "1" } else { "0" },
-                    if has_errors { "" } else { "s" },
-                    if has_warnings { "1" } else { "0" },
-                    if has_warnings { "" } else { "s" }
-                )
-            } else {
-                "1 error".to_string()
-            }
-        );
+        println!("❌ Errors found");
         1
-    } else if has_warnings {
-        println!("⚠️  1 warning found");
-        0 // Warnings don't cause failure
     } else {
         println!("✨ Everything looks healthy!");
         0

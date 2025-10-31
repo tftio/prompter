@@ -47,20 +47,6 @@ fn main() {
             let exit_code = doctor::run_doctor();
             std::process::exit(exit_code);
         }
-        AppMode::Update {
-            version,
-            force,
-            install_dir,
-        } => {
-            let exit_code = workhelix_cli_common::update::run_update(
-                &workhelix_cli_common::RepoInfo::new("tftio", "prompter", "v"),
-                env!("CARGO_PKG_VERSION"),
-                version.as_deref(),
-                force,
-                install_dir.as_deref(),
-            );
-            std::process::exit(exit_code);
-        }
         AppMode::Init => {
             if let Err(e) = init_scaffold() {
                 eprintln!("Init failed: {e}");
