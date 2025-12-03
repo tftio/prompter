@@ -347,3 +347,63 @@ fn test_run_with_custom_post_prompt() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.ends_with("Custom suffix"));
 }
+
+#[test]
+fn test_multiple_profiles_shorthand() {
+    let home = tmp_home("prompter_it_multi");
+    let cfg_path = home.join(".config/prompter");
+    let lib_path = home.join(".local/prompter/library");
+    fs::create_dir_all(&cfg_path).unwrap();
+    fs::create_dir_all(lib_path.join("a")).unwrap();
+    fs::create_dir_all(lib_path.join("b")).unwrap();
+    fs::create_dir_all(lib_path.join("shared")).unwrap();
+
+    // Create files
+    fs::write(lib_path.join("shared/common.md"), b"COMMON\n").unwrap();
+    fs::write(lib_path.join("a/only.md"), b"A_ONLY\n").unwrap();
+    fs::write(lib_path.join("b/only.md"), b"B_ONLY\n").unwrap();
+
+    // Config where both profiles depend on shared file
+    let cfg = r#"
+[profile.a]
+depends_on = ["shared/common.md", "a/only.md"]
+
+[profile.b]
+depends_on = ["shared/common.md", "b/only.md"]
+"#;
+    fs::write(cfg_path.join("config.toml"), cfg).unwrap();
+
+    // Run with multiple profiles in shorthand form: `prompter profile.a profile.b`
+    let out = Command::new(bin_path())
+        .env("HOME", &home)
+        .args(["profile.a", "profile.b"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "run failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    // Common file should appear exactly once (deduplication)
+    let common_count = stdout.matches("COMMON").count();
+    assert_eq!(
+        common_count, 1,
+        "shared/common.md should appear exactly once, found {common_count}"
+    );
+
+    // Both profile-specific files should appear
+    assert!(stdout.contains("A_ONLY"));
+    assert!(stdout.contains("B_ONLY"));
+
+    // Order should be: common (from profile.a), then a/only, then b/only
+    let common_pos = stdout.find("COMMON").unwrap();
+    let a_pos = stdout.find("A_ONLY").unwrap();
+    let b_pos = stdout.find("B_ONLY").unwrap();
+    assert!(
+        common_pos < a_pos && a_pos < b_pos,
+        "Files should appear in order: COMMON < A_ONLY < B_ONLY"
+    );
+}

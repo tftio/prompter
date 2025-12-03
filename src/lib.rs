@@ -42,9 +42,9 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
 
-    /// Profile to render (shorthand for 'run `<profile>`')
+    /// Profile(s) to render (shorthand for 'run <profile>...')
     #[arg(value_name = "PROFILE")]
-    pub profile: Option<String>,
+    pub profiles: Vec<String>,
 
     /// Separator between files
     #[arg(short, long, value_name = "STRING")]
@@ -170,7 +170,7 @@ pub enum AppMode {
 pub fn parse_args_from(args: Vec<String>) -> Result<AppMode, String> {
     let cli = Cli::try_parse_from(args).map_err(|e| e.to_string())?;
 
-    match (&cli.command, &cli.profile) {
+    match (&cli.command, &cli.profiles) {
         (Some(Commands::Version), _) => Ok(AppMode::Version),
         (Some(Commands::License), _) => Ok(AppMode::License),
         (Some(Commands::Init), _) => Ok(AppMode::Init),
@@ -211,19 +211,19 @@ pub fn parse_args_from(args: Vec<String>) -> Result<AppMode, String> {
                 config: cli.config.clone(),
             })
         }
-        (None, Some(profile)) => {
+        (None, profiles) if !profiles.is_empty() => {
             let sep = cli.separator.as_ref().map(|s| unescape(s));
             let pre = cli.pre_prompt.as_ref().map(|s| unescape(s));
             let post = cli.post_prompt.as_ref().map(|s| unescape(s));
             Ok(AppMode::Run {
-                profiles: vec![profile.clone()],
+                profiles: profiles.clone(),
                 separator: sep,
                 pre_prompt: pre,
                 post_prompt: post,
                 config: cli.config.clone(),
             })
         }
-        (None, None) => Ok(AppMode::Help),
+        (None, _) => Ok(AppMode::Help),
     }
 }
 
@@ -1398,6 +1398,7 @@ depends_on = ["file.md"]
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn test_parse_args_from() {
         let args = vec![
             "prompter".into(),
@@ -1439,6 +1440,37 @@ depends_on = ["file.md"]
                 assert_eq!(profiles, vec!["profile".to_string()]);
                 assert_eq!(separator, None);
                 assert_eq!(pre_prompt, Some("Custom pre-prompt".into()));
+                assert_eq!(post_prompt, None);
+                assert!(config.is_none());
+            }
+            _ => panic!("expected run"),
+        }
+
+        // Test multiple profiles in shorthand form
+        let args = vec![
+            "prompter".into(),
+            "profile1".into(),
+            "profile2".into(),
+            "profile3.nested".into(),
+        ];
+        match parse_args_from(args).unwrap() {
+            AppMode::Run {
+                profiles,
+                separator,
+                pre_prompt,
+                post_prompt,
+                config,
+            } => {
+                assert_eq!(
+                    profiles,
+                    vec![
+                        "profile1".to_string(),
+                        "profile2".to_string(),
+                        "profile3.nested".to_string()
+                    ]
+                );
+                assert_eq!(separator, None);
+                assert_eq!(pre_prompt, None);
                 assert_eq!(post_prompt, None);
                 assert!(config.is_none());
             }
