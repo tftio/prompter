@@ -32,32 +32,15 @@ pub struct Config {
 
 /// Command-line interface structure for the prompter tool.
 ///
-/// This structure defines the main CLI interface using clap's derive API,
-/// supporting both subcommands and direct profile rendering.
+/// This structure defines the main CLI interface using clap's derive API.
 #[derive(Parser, Debug)]
 #[command(name = "prompter")]
 #[command(about = "A CLI tool for composing reusable prompt snippets")]
 #[command(version)]
 pub struct Cli {
-    /// Optional subcommand to execute
+    /// Subcommand to execute
     #[command(subcommand)]
-    pub command: Option<Commands>,
-
-    /// Profile(s) to render (shorthand for 'run <profile>...')
-    #[arg(value_name = "PROFILE")]
-    pub profiles: Vec<String>,
-
-    /// Separator between files
-    #[arg(short, long, value_name = "STRING")]
-    pub separator: Option<String>,
-
-    /// Pre-prompt text to inject at the beginning
-    #[arg(short = 'p', long, value_name = "TEXT")]
-    pub pre_prompt: Option<String>,
-
-    /// Post-prompt text to inject at the end
-    #[arg(short = 'P', long, value_name = "TEXT")]
-    pub post_prompt: Option<String>,
+    pub command: Commands,
 
     /// Override configuration file path
     #[arg(short = 'c', long, value_name = "FILE", global = true)]
@@ -178,8 +161,7 @@ pub enum AppMode {
 /// Parse command-line arguments and return the resolved application mode.
 ///
 /// This function takes raw command-line arguments and uses clap to parse them
-/// into a structured `AppMode` enum, handling both subcommands and direct
-/// profile arguments for backward compatibility.
+/// into a structured `AppMode` enum.
 ///
 /// # Arguments
 /// * `args` - Vector of command-line arguments including program name
@@ -196,68 +178,42 @@ pub enum AppMode {
 pub fn parse_args_from(args: Vec<String>) -> Result<AppMode, String> {
     let cli = Cli::try_parse_from(args).map_err(|e| e.to_string())?;
 
-    match (&cli.command, &cli.profiles) {
-        (Some(Commands::Version), _) => Ok(AppMode::Version { json: cli.json }),
-        (Some(Commands::License), _) => Ok(AppMode::License),
-        (Some(Commands::Init), _) => Ok(AppMode::Init),
-        (Some(Commands::List), _) => Ok(AppMode::List {
-            config: cli.config.clone(),
+    match cli.command {
+        Commands::Version => Ok(AppMode::Version { json: cli.json }),
+        Commands::License => Ok(AppMode::License),
+        Commands::Init => Ok(AppMode::Init),
+        Commands::List => Ok(AppMode::List {
+            config: cli.config,
             json: cli.json,
         }),
-        (Some(Commands::Tree), _) => Ok(AppMode::Tree {
-            config: cli.config.clone(),
+        Commands::Tree => Ok(AppMode::Tree {
+            config: cli.config,
             json: cli.json,
         }),
-        (Some(Commands::Validate), _) => Ok(AppMode::Validate {
-            config: cli.config.clone(),
+        Commands::Validate => Ok(AppMode::Validate {
+            config: cli.config,
             json: cli.json,
         }),
-        (Some(Commands::Completions { shell }), _) => Ok(AppMode::Completions { shell: *shell }),
-        (Some(Commands::Doctor), _) => Ok(AppMode::Doctor { json: cli.json }),
-        (
-            Some(Commands::Run {
+        Commands::Completions { shell } => Ok(AppMode::Completions { shell }),
+        Commands::Doctor => Ok(AppMode::Doctor { json: cli.json }),
+        Commands::Run {
+            profiles,
+            separator,
+            pre_prompt,
+            post_prompt,
+        } => {
+            let sep = separator.as_ref().map(|s| unescape(s));
+            let pre = pre_prompt.as_ref().map(|s| unescape(s));
+            let post = post_prompt.as_ref().map(|s| unescape(s));
+            Ok(AppMode::Run {
                 profiles,
-                separator,
-                pre_prompt,
-                post_prompt,
-            }),
-            _,
-        ) => {
-            let sep = separator
-                .as_ref()
-                .or(cli.separator.as_ref())
-                .map(|s| unescape(s));
-            let pre = pre_prompt
-                .as_ref()
-                .or(cli.pre_prompt.as_ref())
-                .map(|s| unescape(s));
-            let post = post_prompt
-                .as_ref()
-                .or(cli.post_prompt.as_ref())
-                .map(|s| unescape(s));
-            Ok(AppMode::Run {
-                profiles: profiles.clone(),
                 separator: sep,
                 pre_prompt: pre,
                 post_prompt: post,
-                config: cli.config.clone(),
+                config: cli.config,
                 json: cli.json,
             })
         }
-        (None, profiles) if !profiles.is_empty() => {
-            let sep = cli.separator.as_ref().map(|s| unescape(s));
-            let pre = cli.pre_prompt.as_ref().map(|s| unescape(s));
-            let post = cli.post_prompt.as_ref().map(|s| unescape(s));
-            Ok(AppMode::Run {
-                profiles: profiles.clone(),
-                separator: sep,
-                pre_prompt: pre,
-                post_prompt: post,
-                config: cli.config.clone(),
-                json: cli.json,
-            })
-        }
-        (None, _) => Ok(AppMode::Help),
     }
 }
 
@@ -1474,14 +1430,10 @@ mod tests {
         let args = vec!["prompter".into(), "--bogus".into()];
         let err = parse_args_from(args).unwrap_err();
         assert!(err.contains("unexpected argument"));
-        // missing separator value
-        let args = vec!["prompter".into(), "--separator".into()];
-        let err = parse_args_from(args).unwrap_err();
-        assert!(err.contains("value is required"));
-        // no action specified (should default to help)
+        // missing required subcommand
         let args = vec!["prompter".into()];
-        let mode = parse_args_from(args).unwrap();
-        assert!(matches!(mode, AppMode::Help));
+        let err = parse_args_from(args).unwrap_err();
+        assert!(err.contains("Usage:") || err.contains("COMMAND"));
     }
 
     #[test]
@@ -1753,6 +1705,7 @@ depends_on = ["file.md"]
     fn test_parse_args_from() {
         let args = vec![
             "prompter".into(),
+            "run".into(),
             "--separator".into(),
             "\\n--\\n".into(),
             "profile".into(),
@@ -1778,6 +1731,7 @@ depends_on = ["file.md"]
 
         let args = vec![
             "prompter".into(),
+            "run".into(),
             "--pre-prompt".into(),
             "Custom pre-prompt".into(),
             "profile".into(),
@@ -1801,9 +1755,10 @@ depends_on = ["file.md"]
             _ => panic!("expected run"),
         }
 
-        // Test multiple profiles in shorthand form
+        // Test multiple profiles with run subcommand
         let args = vec![
             "prompter".into(),
+            "run".into(),
             "profile1".into(),
             "profile2".into(),
             "profile3.nested".into(),

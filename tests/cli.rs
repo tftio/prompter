@@ -78,6 +78,7 @@ fn test_init_list_validate_run() {
     // run profile
     let out = Command::new(bin_path())
         .env("HOME", &home)
+        .arg("run")
         .arg("python.api")
         .output()
         .unwrap();
@@ -137,6 +138,7 @@ depends_on = ["does.not.exist.md", "unknown_profile"]
     // running profile should also fail
     let out = Command::new(bin_path())
         .env("HOME", &home)
+        .arg("run")
         .arg("root")
         .output()
         .unwrap();
@@ -169,7 +171,7 @@ depends_on = ["child", "f/y.md", "a/x.md"]
     // run with separator that will be unescaped
     let out = Command::new(bin_path())
         .env("HOME", &home)
-        .args(["--separator", "\\n--\\n", "root"]) // CLI will unescape to "\n--\n"
+        .args(["run", "--separator", "\\n--\\n", "root"]) // CLI will unescape to "\n--\n"
         .output()
         .unwrap();
     assert!(
@@ -298,7 +300,7 @@ fn test_run_with_separator() {
     // Run with custom separator
     let out = Command::new(bin_path())
         .env("HOME", &home)
-        .args(["--separator", "\\n---\\n", "python.api"])
+        .args(["run", "--separator", "\\n---\\n", "python.api"])
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -319,7 +321,7 @@ fn test_run_with_custom_pre_prompt() {
 
     let out = Command::new(bin_path())
         .env("HOME", &home)
-        .args(["--pre-prompt", "Custom prefix", "python.api"])
+        .args(["run", "--pre-prompt", "Custom prefix", "python.api"])
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -340,7 +342,7 @@ fn test_run_with_custom_post_prompt() {
 
     let out = Command::new(bin_path())
         .env("HOME", &home)
-        .args(["--post-prompt", "Custom suffix", "python.api"])
+        .args(["run", "--post-prompt", "Custom suffix", "python.api"])
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -373,10 +375,10 @@ depends_on = ["shared/common.md", "b/only.md"]
 "#;
     fs::write(cfg_path.join("config.toml"), cfg).unwrap();
 
-    // Run with multiple profiles in shorthand form: `prompter profile.a profile.b`
+    // Run with multiple profiles: `prompter run profile.a profile.b`
     let out = Command::new(bin_path())
         .env("HOME", &home)
-        .args(["profile.a", "profile.b"])
+        .args(["run", "profile.a", "profile.b"])
         .output()
         .unwrap();
     assert!(
