@@ -11,6 +11,7 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use is_terminal::IsTerminal;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
@@ -61,6 +62,10 @@ pub struct Cli {
     /// Override configuration file path
     #[arg(short = 'c', long, value_name = "FILE", global = true)]
     pub config: Option<PathBuf>,
+
+    /// Output in JSON format
+    #[arg(short = 'j', long, global = true)]
+    pub json: bool,
 }
 
 /// Available subcommands for the prompter CLI.
@@ -76,6 +81,8 @@ pub enum Commands {
     Init,
     /// List available profiles
     List,
+    /// Show dependency tree for profiles
+    Tree,
     /// Validate configuration and library references
     Validate,
     /// Render one or more profiles (concatenated file contents with deduplication)
@@ -121,21 +128,37 @@ pub enum AppMode {
         post_prompt: Option<String>,
         /// Optional configuration file override
         config: Option<PathBuf>,
+        /// Output in JSON format
+        json: bool,
     },
     /// List all available profiles using an optional config override
     List {
         /// Optional configuration file override
         config: Option<PathBuf>,
+        /// Output in JSON format
+        json: bool,
+    },
+    /// Show dependency tree for profiles
+    Tree {
+        /// Optional configuration file override
+        config: Option<PathBuf>,
+        /// Output in JSON format
+        json: bool,
     },
     /// Validate configuration and library references with an optional config override
     Validate {
         /// Optional configuration file override
         config: Option<PathBuf>,
+        /// Output in JSON format
+        json: bool,
     },
     /// Initialize default configuration and library
     Init,
     /// Show version information
-    Version,
+    Version {
+        /// Output in JSON format
+        json: bool,
+    },
     /// Show license information
     License,
     /// Show help information
@@ -146,7 +169,10 @@ pub enum AppMode {
         shell: clap_complete::Shell,
     },
     /// Check health and configuration status
-    Doctor,
+    Doctor {
+        /// Output in JSON format
+        json: bool,
+    },
 }
 
 /// Parse command-line arguments and return the resolved application mode.
@@ -171,17 +197,23 @@ pub fn parse_args_from(args: Vec<String>) -> Result<AppMode, String> {
     let cli = Cli::try_parse_from(args).map_err(|e| e.to_string())?;
 
     match (&cli.command, &cli.profiles) {
-        (Some(Commands::Version), _) => Ok(AppMode::Version),
+        (Some(Commands::Version), _) => Ok(AppMode::Version { json: cli.json }),
         (Some(Commands::License), _) => Ok(AppMode::License),
         (Some(Commands::Init), _) => Ok(AppMode::Init),
         (Some(Commands::List), _) => Ok(AppMode::List {
             config: cli.config.clone(),
+            json: cli.json,
+        }),
+        (Some(Commands::Tree), _) => Ok(AppMode::Tree {
+            config: cli.config.clone(),
+            json: cli.json,
         }),
         (Some(Commands::Validate), _) => Ok(AppMode::Validate {
             config: cli.config.clone(),
+            json: cli.json,
         }),
         (Some(Commands::Completions { shell }), _) => Ok(AppMode::Completions { shell: *shell }),
-        (Some(Commands::Doctor), _) => Ok(AppMode::Doctor),
+        (Some(Commands::Doctor), _) => Ok(AppMode::Doctor { json: cli.json }),
         (
             Some(Commands::Run {
                 profiles,
@@ -209,6 +241,7 @@ pub fn parse_args_from(args: Vec<String>) -> Result<AppMode, String> {
                 pre_prompt: pre,
                 post_prompt: post,
                 config: cli.config.clone(),
+                json: cli.json,
             })
         }
         (None, profiles) if !profiles.is_empty() => {
@@ -221,6 +254,7 @@ pub fn parse_args_from(args: Vec<String>) -> Result<AppMode, String> {
                 pre_prompt: pre,
                 post_prompt: post,
                 config: cli.config.clone(),
+                json: cli.json,
             })
         }
         (None, _) => Ok(AppMode::Help),
@@ -302,6 +336,10 @@ fn library_dir_for_config(config: &Path) -> Result<PathBuf, String> {
 
 fn is_terminal() -> bool {
     std::io::stdout().is_terminal()
+}
+
+fn should_use_terminal_effects(json_mode: bool) -> bool {
+    !json_mode && is_terminal()
 }
 
 fn default_pre_prompt() -> String {
@@ -560,6 +598,36 @@ pub enum ResolveError {
     MissingFile(PathBuf, String), // (path, referenced_by)
 }
 
+/// Node type in the dependency tree
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TreeNodeType {
+    /// Profile node
+    Profile,
+    /// Fragment (markdown file) node
+    Fragment,
+}
+
+/// Tree node representing a profile or fragment in the dependency tree
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TreeNode {
+    /// Type of node (profile or fragment)
+    #[serde(rename = "type")]
+    pub node_type: TreeNodeType,
+    /// Name of profile or path of fragment
+    pub name: String,
+    /// Children of this node
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<TreeNode>,
+}
+
+/// Complete tree structure for JSON output
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TreeOutput {
+    /// List of root trees (top-level profiles)
+    pub trees: Vec<TreeNode>,
+}
+
 /// Recursively resolve a profile's dependencies into a list of file paths.
 ///
 /// Performs depth-first traversal of profile dependencies, handling both
@@ -622,27 +690,100 @@ pub fn resolve_profile(
     Ok(())
 }
 
+/// JSON output structure for list command
+#[derive(Debug, Serialize)]
+struct ListOutput {
+    profiles: Vec<ProfileInfo>,
+    fragments: Vec<String>,
+}
+
+/// Profile information for JSON output
+#[derive(Debug, Serialize)]
+struct ProfileInfo {
+    name: String,
+    dependencies: Vec<String>,
+}
+
 /// List all available profiles to a writer.
 ///
 /// Outputs all profile names from the configuration in alphabetical order,
-/// one per line.
+/// one per line (text mode) or as JSON (json mode).
 ///
 /// # Arguments
 /// * `cfg` - Configuration containing profile definitions
+/// * `lib` - Library root directory for finding fragments
+/// * `json` - Whether to output JSON format
 /// * `w` - Writer to output profile names to
 ///
 /// # Returns
 /// * `Ok(())` - All profiles listed successfully
-/// * `Err(io::Error)` - Write operation failed
+/// * `Err(String)` - Operation failed
 ///
 /// # Errors
 /// Returns an error if writing to the output fails.
-pub fn list_profiles(cfg: &Config, mut w: impl Write) -> io::Result<()> {
-    let mut names: Vec<_> = cfg.profiles.keys().cloned().collect();
-    names.sort();
-    for n in names {
-        writeln!(&mut w, "{n}")?;
+pub fn list_profiles(
+    cfg: &Config,
+    lib: &Path,
+    json: bool,
+    mut w: impl Write,
+) -> Result<(), String> {
+    if json {
+        // Collect all fragments from library directory
+        let mut fragments = Vec::new();
+        if lib.exists() {
+            collect_fragments(lib, lib, &mut fragments)?;
+        }
+        fragments.sort();
+
+        // Build profile info
+        let mut profiles: Vec<ProfileInfo> = cfg
+            .profiles
+            .iter()
+            .map(|(name, deps)| ProfileInfo {
+                name: name.clone(),
+                dependencies: deps.clone(),
+            })
+            .collect();
+        profiles.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let output = ListOutput {
+            profiles,
+            fragments,
+        };
+        let json_output = serde_json::to_string_pretty(&output)
+            .map_err(|e| format!("JSON serialization error: {e}"))?;
+        writeln!(&mut w, "{json_output}").map_err(|e| format!("Write error: {e}"))?;
+    } else {
+        let mut names: Vec<_> = cfg.profiles.keys().cloned().collect();
+        names.sort();
+        for n in names {
+            writeln!(&mut w, "{n}").map_err(|e| format!("Write error: {e}"))?;
+        }
     }
+    Ok(())
+}
+
+/// Recursively collect all .md files from a directory
+fn collect_fragments(root: &Path, dir: &Path, fragments: &mut Vec<String>) -> Result<(), String> {
+    let entries = fs::read_dir(dir)
+        .map_err(|e| format!("Failed to read directory {}: {}", dir.display(), e))?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Failed to read directory entry: {e}"))?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            collect_fragments(root, &path, fragments)?;
+        } else if path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+        {
+            if let Ok(rel_path) = path.strip_prefix(root) {
+                fragments.push(rel_path.display().to_string());
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -708,6 +849,129 @@ pub fn validate(cfg: &Config, lib: &Path) -> Result<(), String> {
     } else {
         Err(errors.join("\n"))
     }
+}
+
+/// Build a tree node for a profile or fragment
+fn build_tree_node(name: &str, cfg: &Config) -> TreeNode {
+    // Check if it's a fragment (ends with .md)
+    if std::path::Path::new(name)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+    {
+        return TreeNode {
+            node_type: TreeNodeType::Fragment,
+            name: name.to_string(),
+            children: Vec::new(),
+        };
+    }
+
+    // It's a profile - recursively build children
+    let children = cfg
+        .profiles
+        .get(name)
+        .map(|deps| deps.iter().map(|dep| build_tree_node(dep, cfg)).collect())
+        .unwrap_or_default();
+
+    TreeNode {
+        node_type: TreeNodeType::Profile,
+        name: name.to_string(),
+        children,
+    }
+}
+
+/// Find root profiles (profiles that are not referenced by any other profile)
+fn find_root_profiles(cfg: &Config) -> Vec<String> {
+    let mut referenced = HashSet::new();
+
+    // Collect all profiles that are referenced by others
+    for deps in cfg.profiles.values() {
+        for dep in deps {
+            // Only track profile references (not .md files)
+            if !std::path::Path::new(dep)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+            {
+                referenced.insert(dep.clone());
+            }
+        }
+    }
+
+    // Find profiles that are never referenced
+    let mut roots: Vec<String> = cfg
+        .profiles
+        .keys()
+        .filter(|profile| !referenced.contains(*profile))
+        .cloned()
+        .collect();
+
+    roots.sort();
+    roots
+}
+
+/// Build complete tree structure for all root profiles
+fn build_trees(cfg: &Config) -> TreeOutput {
+    let root_profiles = find_root_profiles(cfg);
+    let trees = root_profiles
+        .iter()
+        .map(|profile| build_tree_node(profile, cfg))
+        .collect();
+
+    TreeOutput { trees }
+}
+
+/// Print tree structure in traditional tree format
+fn print_tree(node: &TreeNode, prefix: &str, is_last: bool, w: &mut impl Write) -> io::Result<()> {
+    // Print current node with appropriate connector
+    let connector = if is_last { "└── " } else { "├── " };
+    writeln!(w, "{prefix}{connector}{}", node.name)?;
+
+    // Prepare prefix for children
+    let child_prefix = format!("{}{}", prefix, if is_last { "    " } else { "│   " });
+
+    // Print children
+    for (i, child) in node.children.iter().enumerate() {
+        let is_last_child = i == node.children.len() - 1;
+        print_tree(child, &child_prefix, is_last_child, w)?;
+    }
+
+    Ok(())
+}
+
+/// Show tree structure for all profiles
+pub fn show_tree(cfg: &Config, json: bool, mut w: impl Write) -> Result<(), String> {
+    let trees = build_trees(cfg);
+
+    if json {
+        let json_output = serde_json::to_string_pretty(&trees)
+            .map_err(|e| format!("JSON serialization error: {e}"))?;
+        writeln!(&mut w, "{json_output}").map_err(|e| format!("Write error: {e}"))?;
+    } else {
+        for (i, tree) in trees.trees.iter().enumerate() {
+            // Print root profile name
+            writeln!(&mut w, "{}", tree.name).map_err(|e| format!("Write error: {e}"))?;
+
+            // Print children with tree structure
+            for (j, child) in tree.children.iter().enumerate() {
+                let is_last = j == tree.children.len() - 1;
+                print_tree(child, "", is_last, &mut w).map_err(|e| format!("Write error: {e}"))?;
+            }
+
+            // Add blank line between trees (except after last one)
+            if i < trees.trees.len() - 1 {
+                writeln!(&mut w).map_err(|e| format!("Write error: {e}"))?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Show tree structure to stdout
+pub fn run_tree_stdout(config_override: Option<&Path>, json: bool) -> Result<(), String> {
+    let cfg_path = resolve_config_path(config_override)?;
+    let cfg_text = read_config_with_path(&cfg_path)?;
+    let cfg = parse_config_toml(&cfg_text)?;
+    show_tree(&cfg, json, io::stdout())
 }
 
 /// Initialize default configuration and library structure.
@@ -831,6 +1095,10 @@ depends_on = ["python.api", "a/b/d.md"]
 /// Convenience function that reads configuration and lists all profiles
 /// to standard output.
 ///
+/// # Arguments
+/// * `config_override` - Optional configuration file override
+/// * `json` - Whether to output in JSON format
+///
 /// # Returns
 /// * `Ok(())` - Profiles listed successfully
 /// * `Err(String)` - Operation failed
@@ -839,17 +1107,28 @@ depends_on = ["python.api", "a/b/d.md"]
 /// Returns an error if:
 /// - Configuration file cannot be read or parsed
 /// - Writing to stdout fails
-pub fn run_list_stdout(config_override: Option<&Path>) -> Result<(), String> {
+pub fn run_list_stdout(config_override: Option<&Path>, json: bool) -> Result<(), String> {
     let cfg_path = resolve_config_path(config_override)?;
     let cfg_text = read_config_with_path(&cfg_path)?;
     let cfg = parse_config_toml(&cfg_text)?;
-    list_profiles(&cfg, io::stdout()).map_err(|e| e.to_string())
+    let lib = library_path_for_config_override(config_override, &cfg_path)?;
+    list_profiles(&cfg, &lib, json, io::stdout())
+}
+
+/// JSON output for successful validation
+#[derive(Debug, Serialize)]
+struct ValidateOutput {
+    valid: bool,
 }
 
 /// Validate configuration and output results to stdout.
 ///
 /// Convenience function that reads configuration and validates it,
 /// outputting any errors found.
+///
+/// # Arguments
+/// * `config_override` - Optional configuration file override
+/// * `json` - Whether to output in JSON format
 ///
 /// # Returns
 /// * `Ok(())` - Configuration is valid
@@ -859,12 +1138,37 @@ pub fn run_list_stdout(config_override: Option<&Path>) -> Result<(), String> {
 /// Returns an error if:
 /// - Configuration file cannot be read or parsed
 /// - Validation finds missing files or circular dependencies
-pub fn run_validate_stdout(config_override: Option<&Path>) -> Result<(), String> {
+pub fn run_validate_stdout(config_override: Option<&Path>, json: bool) -> Result<(), String> {
     let cfg_path = resolve_config_path(config_override)?;
     let cfg_text = read_config_with_path(&cfg_path)?;
     let cfg = parse_config_toml(&cfg_text)?;
     let lib = library_path_for_config_override(config_override, &cfg_path)?;
-    validate(&cfg, &lib)
+    validate(&cfg, &lib)?;
+
+    if json {
+        let output = ValidateOutput { valid: true };
+        let json_output = serde_json::to_string_pretty(&output)
+            .map_err(|e| format!("JSON serialization error: {e}"))?;
+        println!("{json_output}");
+    }
+
+    Ok(())
+}
+
+/// JSON structure for a single fragment
+#[derive(Debug, Serialize)]
+struct FragmentOutput {
+    path: String,
+    content: String,
+}
+
+/// JSON output structure for render command
+#[derive(Debug, Serialize)]
+struct RenderOutput {
+    profile: String,
+    pre_prompt: String,
+    system_info: String,
+    fragments: Vec<FragmentOutput>,
 }
 
 /// Render one or more profiles' content to a writer.
@@ -883,6 +1187,7 @@ pub fn run_validate_stdout(config_override: Option<&Path>) -> Result<(), String>
 /// * `separator` - Optional separator between files
 /// * `pre_prompt` - Optional custom pre-prompt (defaults to LLM instructions)
 /// * `post_prompt` - Optional custom post-prompt (defaults to @AGENTS/@CLAUDE instructions)
+/// * `json` - Whether to output in JSON format
 ///
 /// # Returns
 /// * `Ok(())` - Profiles rendered successfully
@@ -901,6 +1206,7 @@ pub fn render_to_writer(
     separator: Option<&str>,
     pre_prompt: Option<&str>,
     post_prompt: Option<&str>,
+    json: bool,
 ) -> Result<(), String> {
     let mut seen_files = HashSet::new();
     let mut files = Vec::new();
@@ -921,50 +1227,84 @@ pub fn render_to_writer(
         )?;
     }
 
-    // Write pre-prompt (defaults if not provided)
-    let default_pre = default_pre_prompt();
-    let pre_prompt_text = pre_prompt.unwrap_or(&default_pre);
-    w.write_all(pre_prompt_text.as_bytes())
-        .map_err(|e| format!("Write error: {e}"))?;
+    if json {
+        // JSON output mode
+        let default_pre = default_pre_prompt();
+        let pre_prompt_text = pre_prompt.unwrap_or(&default_pre).to_string();
 
-    // Write system prefix with two newlines before
-    w.write_all(b"\n")
-        .map_err(|e| format!("Write error: {e}"))?;
-    let prefix = format_system_prefix();
-    w.write_all(prefix.as_bytes())
-        .map_err(|e| format!("Write error: {e}"))?;
+        let date = Local::now().format("%Y-%m-%d").to_string();
+        let os = env::consts::OS;
+        let arch = env::consts::ARCH;
+        let system_info = format!("Today is {date}, and you are running on a {arch}/{os} system.");
 
-    let sep = separator.unwrap_or("");
-    for path in files {
-        // Two newlines before each file
-        w.write_all(b"\n")
+        let mut fragments = Vec::new();
+        for path in &files {
+            let content = fs::read_to_string(path)
+                .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+            let rel_path = path.strip_prefix(lib).unwrap_or(path).display().to_string();
+            fragments.push(FragmentOutput {
+                path: rel_path,
+                content,
+            });
+        }
+
+        let output = RenderOutput {
+            profile: profiles.join(", "),
+            pre_prompt: pre_prompt_text,
+            system_info,
+            fragments,
+        };
+
+        let json_output = serde_json::to_string_pretty(&output)
+            .map_err(|e| format!("JSON serialization error: {e}"))?;
+        writeln!(&mut w, "{json_output}").map_err(|e| format!("Write error: {e}"))?;
+    } else {
+        // Text output mode
+        // Write pre-prompt (defaults if not provided)
+        let default_pre = default_pre_prompt();
+        let pre_prompt_text = pre_prompt.unwrap_or(&default_pre);
+        w.write_all(pre_prompt_text.as_bytes())
             .map_err(|e| format!("Write error: {e}"))?;
 
-        match fs::read(&path) {
-            Ok(bytes) => w
-                .write_all(&bytes)
-                .map_err(|e| format!("Write error: {e}"))?,
-            Err(e) => return Err(format!("Failed to read {}: {}", path.display(), e)),
-        }
+        // Write system prefix with two newlines before
+        w.write_all(b"\n")
+            .map_err(|e| format!("Write error: {e}"))?;
+        let prefix = format_system_prefix();
+        w.write_all(prefix.as_bytes())
+            .map_err(|e| format!("Write error: {e}"))?;
 
-        // Write separator after each file if provided
-        if !sep.is_empty() {
-            w.write_all(sep.as_bytes())
+        let sep = separator.unwrap_or("");
+        for path in files {
+            // Two newlines before each file
+            w.write_all(b"\n")
                 .map_err(|e| format!("Write error: {e}"))?;
+
+            match fs::read(&path) {
+                Ok(bytes) => w
+                    .write_all(&bytes)
+                    .map_err(|e| format!("Write error: {e}"))?,
+                Err(e) => return Err(format!("Failed to read {}: {}", path.display(), e)),
+            }
+
+            // Write separator after each file if provided
+            if !sep.is_empty() {
+                w.write_all(sep.as_bytes())
+                    .map_err(|e| format!("Write error: {e}"))?;
+            }
         }
+
+        // Write post-prompt (defaults if not provided)
+        let default_post = default_post_prompt();
+        let post_prompt_text = post_prompt
+            .or(cfg.post_prompt.as_deref())
+            .unwrap_or(&default_post);
+
+        // Two newlines before post-prompt
+        w.write_all(b"\n\n")
+            .map_err(|e| format!("Write error: {e}"))?;
+        w.write_all(post_prompt_text.as_bytes())
+            .map_err(|e| format!("Write error: {e}"))?;
     }
-
-    // Write post-prompt (defaults if not provided)
-    let default_post = default_post_prompt();
-    let post_prompt_text = post_prompt
-        .or(cfg.post_prompt.as_deref())
-        .unwrap_or(&default_post);
-
-    // Two newlines before post-prompt
-    w.write_all(b"\n\n")
-        .map_err(|e| format!("Write error: {e}"))?;
-    w.write_all(post_prompt_text.as_bytes())
-        .map_err(|e| format!("Write error: {e}"))?;
 
     Ok(())
 }
@@ -980,6 +1320,8 @@ pub fn render_to_writer(
 /// * `separator` - Optional separator between files
 /// * `pre_prompt` - Optional custom pre-prompt text
 /// * `post_prompt` - Optional custom post-prompt text
+/// * `config_override` - Optional configuration file override
+/// * `json` - Whether to output in JSON format
 ///
 /// # Returns
 /// * `Ok(())` - Profiles rendered successfully
@@ -996,6 +1338,7 @@ pub fn run_render_stdout(
     pre_prompt: Option<&str>,
     post_prompt: Option<&str>,
     config_override: Option<&Path>,
+    json: bool,
 ) -> Result<(), String> {
     let cfg_path = resolve_config_path(config_override)?;
     let cfg_text = read_config_with_path(&cfg_path)?;
@@ -1011,6 +1354,7 @@ pub fn run_render_stdout(
         separator,
         pre_prompt,
         post_prompt,
+        json,
     )
 }
 
@@ -1146,8 +1490,10 @@ mod tests {
             profiles: HashMap::from([("b".into(), vec![]), ("a".into(), vec![])]),
             post_prompt: None,
         };
+        let lib = mk_tmp("prompter_list_order");
+        fs::create_dir_all(&lib).unwrap();
         let mut out = Vec::new();
-        super::list_profiles(&cfg, &mut out).unwrap();
+        super::list_profiles(&cfg, &lib, false, &mut out).unwrap();
         assert_eq!(String::from_utf8(out).unwrap(), "a\nb\n");
     }
 
@@ -1208,6 +1554,7 @@ depends_on = [
             Some("\n--\n"),
             None,
             None,
+            false,
         )
         .unwrap();
 
@@ -1248,6 +1595,7 @@ depends_on = [
             None,
             Some("Custom pre-prompt\n\n"),
             None,
+            false,
         )
         .unwrap();
 
@@ -1284,6 +1632,7 @@ depends_on = [
             None,
             None,
             None,
+            false,
         )
         .unwrap();
 
@@ -1301,6 +1650,7 @@ depends_on = [
             None,
             None,
             Some("CLI post-prompt"),
+            false,
         )
         .unwrap();
 
@@ -1346,6 +1696,7 @@ depends_on = [
             Some("\n---\n"),
             None,
             None,
+            false,
         )
         .unwrap();
 
@@ -1413,12 +1764,14 @@ depends_on = ["file.md"]
                 pre_prompt,
                 post_prompt,
                 config,
+                json,
             } => {
                 assert_eq!(profiles, vec!["profile".to_string()]);
                 assert_eq!(separator, Some("\n--\n".into()));
                 assert_eq!(pre_prompt, None);
                 assert_eq!(post_prompt, None);
                 assert!(config.is_none());
+                assert!(!json);
             }
             _ => panic!("expected run"),
         }
@@ -1436,12 +1789,14 @@ depends_on = ["file.md"]
                 pre_prompt,
                 post_prompt,
                 config,
+                json,
             } => {
                 assert_eq!(profiles, vec!["profile".to_string()]);
                 assert_eq!(separator, None);
                 assert_eq!(pre_prompt, Some("Custom pre-prompt".into()));
                 assert_eq!(post_prompt, None);
                 assert!(config.is_none());
+                assert!(!json);
             }
             _ => panic!("expected run"),
         }
@@ -1460,6 +1815,7 @@ depends_on = ["file.md"]
                 pre_prompt,
                 post_prompt,
                 config,
+                json,
             } => {
                 assert_eq!(
                     profiles,
@@ -1473,6 +1829,7 @@ depends_on = ["file.md"]
                 assert_eq!(pre_prompt, None);
                 assert_eq!(post_prompt, None);
                 assert!(config.is_none());
+                assert!(!json);
             }
             _ => panic!("expected run"),
         }
@@ -1480,17 +1837,26 @@ depends_on = ["file.md"]
         let args = vec!["prompter".into(), "list".into()];
         assert!(matches!(
             parse_args_from(args).unwrap(),
-            AppMode::List { config: None }
+            AppMode::List {
+                config: None,
+                json: false
+            }
         ));
         let args = vec!["prompter".into(), "validate".into()];
         assert!(matches!(
             parse_args_from(args).unwrap(),
-            AppMode::Validate { config: None }
+            AppMode::Validate {
+                config: None,
+                json: false
+            }
         ));
         let args = vec!["prompter".into(), "init".into()];
         assert!(matches!(parse_args_from(args).unwrap(), AppMode::Init));
         let args = vec!["prompter".into(), "version".into()];
-        assert!(matches!(parse_args_from(args).unwrap(), AppMode::Version));
+        assert!(matches!(
+            parse_args_from(args).unwrap(),
+            AppMode::Version { json: false }
+        ));
 
         let args = vec![
             "prompter".into(),
@@ -1499,8 +1865,9 @@ depends_on = ["file.md"]
             "list".into(),
         ];
         match parse_args_from(args).unwrap() {
-            AppMode::List { config } => {
+            AppMode::List { config, json } => {
                 assert_eq!(config, Some(PathBuf::from("custom/config.toml")));
+                assert!(!json);
             }
             other => panic!("unexpected mode: {other:?}"),
         }
@@ -1513,8 +1880,9 @@ depends_on = ["file.md"]
             "profile".into(),
         ];
         match parse_args_from(args).unwrap() {
-            AppMode::Run { config, .. } => {
+            AppMode::Run { config, json, .. } => {
                 assert_eq!(config, Some(PathBuf::from("custom/config.toml")));
+                assert!(!json);
             }
             other => panic!("unexpected mode: {other:?}"),
         }
@@ -1561,6 +1929,7 @@ depends_on = ["file.md"]
             Some("--"),
             None,
             None,
+            false,
         )
         .unwrap_err();
         assert!(err.contains("Write error"), "err={err}");
@@ -1587,6 +1956,7 @@ depends_on = ["file.md"]
             Some("--"),
             None,
             None,
+            false,
         )
         .unwrap_err();
         assert!(err.contains("Write error"), "err={err}");
@@ -1616,8 +1986,8 @@ depends_on = ["child", "f/y.md"]
         unsafe {
             env::set_var("HOME", &home);
         }
-        assert!(super::run_validate_stdout(None).is_ok());
-        assert!(super::run_list_stdout(None).is_ok());
+        assert!(super::run_validate_stdout(None, false).is_ok());
+        assert!(super::run_list_stdout(None, false).is_ok());
         if let Some(prev) = prev_home {
             unsafe {
                 env::set_var("HOME", prev);
@@ -1646,7 +2016,7 @@ depends_on = ["missing.md", "unknown_profile"]
         unsafe {
             env::set_var("HOME", &home);
         }
-        let err = super::run_validate_stdout(None).unwrap_err();
+        let err = super::run_validate_stdout(None, false).unwrap_err();
         assert!(
             err.contains("Missing file") && err.contains("Unknown profile"),
             "err={err}"

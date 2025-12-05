@@ -1279,7 +1279,7 @@ dependencies = [
 
 [[package]]
 name = "prompter"
-version = "1.9.0"
+version = "1.9.1"
 dependencies = [
  "cargo-edit",
  "chrono",
@@ -1289,6 +1289,8 @@ dependencies = [
  "dirs",
  "indicatif",
  "is-terminal",
+ "serde",
+ "serde_json",
  "toml 0.9.8",
  "workhelix-cli-common",
 ]

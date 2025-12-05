@@ -7,7 +7,7 @@ use std::env;
 use clap::Parser;
 use prompter::{
     AppMode, Cli, init_scaffold, parse_args_from, run_list_stdout, run_render_stdout,
-    run_validate_stdout,
+    run_tree_stdout, run_validate_stdout,
 };
 use workhelix_cli_common::LicenseType;
 
@@ -31,8 +31,12 @@ fn main() {
         AppMode::Help => {
             Cli::parse_from(["prompter", "--help"]);
         }
-        AppMode::Version => {
-            println!("prompter {}", env!("CARGO_PKG_VERSION"));
+        AppMode::Version { json } => {
+            if json {
+                println!(r#"{{"version":"{}"}}"#, env!("CARGO_PKG_VERSION"));
+            } else {
+                println!("prompter {}", env!("CARGO_PKG_VERSION"));
+            }
         }
         AppMode::License => {
             println!(
@@ -43,8 +47,8 @@ fn main() {
         AppMode::Completions { shell } => {
             prompter::completions::generate(shell);
         }
-        AppMode::Doctor => {
-            let exit_code = doctor::run_doctor();
+        AppMode::Doctor { json } => {
+            let exit_code = doctor::run_doctor_with_json(json);
             std::process::exit(exit_code);
         }
         AppMode::Init => {
@@ -53,16 +57,30 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        AppMode::List { config } => {
-            if let Err(e) = run_list_stdout(config.as_deref()) {
+        AppMode::List { config, json } => {
+            if let Err(e) = run_list_stdout(config.as_deref(), json) {
                 eprintln!("{e}");
                 std::process::exit(1);
             }
         }
-        AppMode::Validate { config } => match run_validate_stdout(config.as_deref()) {
-            Ok(()) => println!("All profiles valid"),
+        AppMode::Tree { config, json } => {
+            if let Err(e) = run_tree_stdout(config.as_deref(), json) {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        AppMode::Validate { config, json } => match run_validate_stdout(config.as_deref(), json) {
+            Ok(()) => {
+                if !json {
+                    println!("All profiles valid");
+                }
+            }
             Err(errs) => {
-                eprintln!("Validation errors:\n{errs}");
+                if json {
+                    eprintln!(r#"{{"error":"{}"}}"#, errs.replace('"', "\\\""));
+                } else {
+                    eprintln!("Validation errors:\n{errs}");
+                }
                 std::process::exit(1);
             }
         },
@@ -72,6 +90,7 @@ fn main() {
             pre_prompt,
             post_prompt,
             config,
+            json,
         } => {
             if let Err(e) = run_render_stdout(
                 &profiles,
@@ -79,8 +98,13 @@ fn main() {
                 pre_prompt.as_deref(),
                 post_prompt.as_deref(),
                 config.as_deref(),
+                json,
             ) {
-                eprintln!("{e}");
+                if json {
+                    eprintln!(r#"{{"error":"{}"}}"#, e.replace('"', "\\\""));
+                } else {
+                    eprintln!("{e}");
+                }
                 std::process::exit(1);
             }
         }
